@@ -2,13 +2,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
-#include <dirent.h>
-#include <limits.h>
+#include <glob.h>
+#include <iconv.h>
+#include <errno.h>
 
 #define MAX_STRING 1024
 #define COMPARE_LEN 5
 
-// Структура для хранения библиографической записи
 typedef struct {
     char author[MAX_STRING];
     char title[MAX_STRING];
@@ -22,14 +22,12 @@ typedef struct {
     char url[MAX_STRING];
 } BibRecord;
 
-// Узел двоичного дерева
 typedef struct TreeNode {
     BibRecord record;
     struct TreeNode *left;
     struct TreeNode *right;
 } TreeNode;
 
-// Функция для сравнения русских строк по первым 5 символам (CP1251)
 int strncmp_cp1251(const char *s1, const char *s2, size_t n) {
     for (size_t i = 0; i < n; i++) {
         if (s1[i] != s2[i]) {
@@ -42,7 +40,6 @@ int strncmp_cp1251(const char *s1, const char *s2, size_t n) {
     return 0;
 }
 
-// Функция для сравнения библиографических записей
 int compare_records(const BibRecord *a, const BibRecord *b) {
     int author_cmp = strncmp_cp1251(a->author, b->author, COMPARE_LEN);
     if (author_cmp != 0) return author_cmp;
@@ -50,14 +47,13 @@ int compare_records(const BibRecord *a, const BibRecord *b) {
     int title_cmp = strncmp_cp1251(a->title, b->title, COMPARE_LEN);
     if (title_cmp != 0) return title_cmp;
 
-    return strncmp_cp1251(a->journal, b->journal, COMPARE_LEN);
+    return strncmp_cp1251(a->edition, b->edition, COMPARE_LEN);
 }
 
-// Создание нового узла дерева
 TreeNode* create_node(const BibRecord *record) {
     TreeNode *node = (TreeNode*)malloc(sizeof(TreeNode));
     if (node == NULL) {
-        fprintf(stderr, "Memory allocation failed\n");
+        fprintf(stderr, "Ошибка выделения памяти\n");
         exit(EXIT_FAILURE);
     }
     node->record = *record;
@@ -66,7 +62,6 @@ TreeNode* create_node(const BibRecord *record) {
     return node;
 }
 
-// Вставка записи в дерево
 void insert_node(TreeNode **root, const BibRecord *record) {
     if (*root == NULL) {
         *root = create_node(record);
@@ -80,7 +75,6 @@ void insert_node(TreeNode **root, const BibRecord *record) {
     }
 }
 
-// Освобождение памяти дерева
 void free_tree(TreeNode *root) {
     if (root == NULL) return;
     free_tree(root->left);
@@ -88,72 +82,99 @@ void free_tree(TreeNode *root) {
     free(root);
 }
 
-// Поиск записей по первым 5 символам в любом поле
 void search_records(TreeNode *root, const char *search_term, FILE *output) {
     if (root == NULL) return;
 
     search_records(root->left, search_term, output);
 
-    // Проверяем все поля на совпадение первых 5 символов
-    if (strncmp(root->record.author, search_term, COMPARE_LEN) == 0 ||
-        strncmp(root->record.title, search_term, COMPARE_LEN) == 0 ||
-        strncmp(root->record.journal, search_term, COMPARE_LEN) == 0 ||
-        strncmp(root->record.publisher, search_term, COMPARE_LEN) == 0 ||
-        strncmp(root->record.isbn, search_term, COMPARE_LEN) == 0) {
+    if (strncmp_cp1251(root->record.author, search_term, COMPARE_LEN) == 0 ||
+        strncmp_cp1251(root->record.title, search_term, COMPARE_LEN) == 0 ||
+        strncmp_cp1251(root->record.journal, search_term, COMPARE_LEN) == 0 ||
+        strncmp_cp1251(root->record.publisher, search_term, COMPARE_LEN) == 0 ||
+        strncmp_cp1251(root->record.isbn, search_term, COMPARE_LEN) == 0) {
         
-        fprintf(output, "   title =     {%s},\n", root->record.title);
+        fprintf(output, "@article{,\n");
         fprintf(output, "   author =    {%s},\n", root->record.author);
-        fprintf(output, "   publisher = {%s},\n", root->record.publisher);
-        fprintf(output, "   isbn =      {%s},\n", root->record.isbn);
-        fprintf(output, "   year =      {%s},\n", root->record.year);
-        fprintf(output, "   series =    {%s},\n", root->record.series);
-        fprintf(output, "   edition =   {%s},\n", root->record.edition);
-        fprintf(output, "   volume =    {%s},\n", root->record.volume);
-        fprintf(output, "   url =       {%s},\n\n", root->record.url);
+        fprintf(output, "   title =     {%s},\n", root->record.title);
+        if (root->record.journal[0] != '\0')
+            fprintf(output, "   journal =   {%s},\n", root->record.journal);
+        if (root->record.year[0] != '\0')
+            fprintf(output, "   year =      {%s},\n", root->record.year);
+        if (root->record.publisher[0] != '\0')
+            fprintf(output, "   publisher = {%s},\n", root->record.publisher);
+        if (root->record.isbn[0] != '\0')
+            fprintf(output, "   isbn =      {%s},\n", root->record.isbn);
+        if (root->record.series[0] != '\0')
+            fprintf(output, "   series =    {%s},\n", root->record.series);
+        if (root->record.edition[0] != '\0')
+            fprintf(output, "   edition =   {%s},\n", root->record.edition);
+        if (root->record.volume[0] != '\0')
+            fprintf(output, "   volume =    {%s},\n", root->record.volume);
+        if (root->record.url[0] != '\0')
+            fprintf(output, "   url =       {%s},\n", root->record.url);
+        fprintf(output, "}\n\n");
     }
 
     search_records(root->right, search_term, output);
 }
 
-// Обход дерева в порядке in-order и запись в файл
 void write_tree_to_file(TreeNode *root, FILE *output) {
     if (root == NULL) return;
 
     write_tree_to_file(root->left, output);
 
-    fprintf(output, "   title =     {%s},\n", root->record.title);
+    fprintf(output, "@article{,\n");
     fprintf(output, "   author =    {%s},\n", root->record.author);
-    fprintf(output, "   publisher = {%s},\n", root->record.publisher);
-    fprintf(output, "   isbn =      {%s},\n", root->record.isbn);
-    fprintf(output, "   year =      {%s},\n", root->record.year);
-    fprintf(output, "   series =    {%s},\n", root->record.series);
-    fprintf(output, "   edition =   {%s},\n", root->record.edition);
-    fprintf(output, "   volume =    {%s},\n", root->record.volume);
-    fprintf(output, "   url =       {%s},\n\n", root->record.url);
+    fprintf(output, "   title =     {%s},\n", root->record.title);
+    if (root->record.journal[0] != '\0')
+        fprintf(output, "   journal =   {%s},\n", root->record.journal);
+    if (root->record.year[0] != '\0')
+        fprintf(output, "   year =      {%s},\n", root->record.year);
+    if (root->record.publisher[0] != '\0')
+        fprintf(output, "   publisher = {%s},\n", root->record.publisher);
+    if (root->record.isbn[0] != '\0')
+        fprintf(output, "   isbn =      {%s},\n", root->record.isbn);
+    if (root->record.series[0] != '\0')
+        fprintf(output, "   series =    {%s},\n", root->record.series);
+    if (root->record.edition[0] != '\0')
+        fprintf(output, "   edition =   {%s},\n", root->record.edition);
+    if (root->record.volume[0] != '\0')
+        fprintf(output, "   volume =    {%s},\n", root->record.volume);
+    if (root->record.url[0] != '\0')
+        fprintf(output, "   url =       {%s},\n", root->record.url);
+    fprintf(output, "}\n\n");
 
     write_tree_to_file(root->right, output);
 }
 
-// Функция для извлечения значения из строки .bib файла
 void extract_value(const char *line, char *dest) {
     const char *start = strchr(line, '{');
-    const char *end = strchr(line, '}');
+    const char *end = strrchr(line, '}');
 
     if (start && end && start < end) {
         size_t len = end - start - 1;
         if (len >= MAX_STRING) len = MAX_STRING - 1;
         strncpy(dest, start + 1, len);
         dest[len] = '\0';
+
+        while (isspace(*dest) || *dest == '"' || *dest == '\'') {
+            memmove(dest, dest+1, strlen(dest));
+        }
+        
+        char *end_ptr = dest + strlen(dest) - 1;
+        while (end_ptr >= dest && (isspace(*end_ptr) || *end_ptr == '"' || *end_ptr == '\'')) {
+            *end_ptr = '\0';
+            end_ptr--;
+        }
     } else {
         dest[0] = '\0';
     }
 }
 
-// Парсинг .bib файла и добавление записей в дерево
 void parse_bib_file(const char *filename, TreeNode **root) {
     FILE *file = fopen(filename, "r");
     if (file == NULL) {
-        fprintf(stderr, "Could not open file: %s\n", filename);
+        fprintf(stderr, "Не удалось открыть файл: %s\n", filename);
         return;
     }
 
@@ -163,8 +184,7 @@ void parse_bib_file(const char *filename, TreeNode **root) {
 
     memset(&current_record, 0, sizeof(BibRecord));
 
-    while (fgets(line, sizeof(line), file)) {
-        // Удаляем лишние пробелы и переносы строк
+    while (fgets(line, sizeof(line), file) != NULL) {
         char *trimmed_line = line;
         while (isspace(*trimmed_line)) trimmed_line++;
         char *end = trimmed_line + strlen(trimmed_line) - 1;
@@ -172,9 +192,7 @@ void parse_bib_file(const char *filename, TreeNode **root) {
         *(end + 1) = '\0';
 
         if (strstr(trimmed_line, "@")) {
-            // Начало новой записи
             if (in_entry) {
-                // Добавляем предыдущую запись в дерево
                 insert_node(root, &current_record);
                 memset(&current_record, 0, sizeof(BibRecord));
             }
@@ -204,7 +222,6 @@ void parse_bib_file(const char *filename, TreeNode **root) {
         }
     }
 
-    // Добавляем последнюю запись
     if (in_entry) {
         insert_node(root, &current_record);
     }
@@ -214,32 +231,43 @@ void parse_bib_file(const char *filename, TreeNode **root) {
 
 int main(int argc, char *argv[]) {
     if (argc < 2) {
-        printf("Usage: %s file1.bib file2.bib ... [search_term]\n", argv[0]);
+        printf("Использование: %s файл1.bib файл2.bib ... [термин_поиска]\n", argv[0]);
+        printf("Или: %s *.bib [термин_поиска]\n", argv[0]);
         return EXIT_FAILURE;
     }
 
     TreeNode *root = NULL;
+    glob_t glob_result;
+    int glob_flags = 0;
+    int last_arg_is_search = 0;
+    char *search_term = NULL;
 
-    // Парсим все файлы .bib
-    for (int i = 1; i < argc; i++) {
-        // Проверяем, не является ли аргумент поисковым термином
-        if (i == argc - 1 && strchr(argv[i], '@') == NULL && strchr(argv[i], '.') == NULL) {
-            break; // Последний аргумент - поисковый термин
-        }
-        parse_bib_file(argv[i], &root);
+    if (argc > 2 && strchr(argv[argc-1], '@') == NULL && strchr(argv[argc-1], '.') == NULL) {
+        last_arg_is_search = 1;
+        search_term = argv[argc-1];
     }
+
+    int file_args = last_arg_is_search ? argc-1 : argc;
+    for (int i = 1; i < file_args; i++) {
+        glob(argv[i], glob_flags, NULL, &glob_result);
+        glob_flags |= GLOB_APPEND;
+    }
+
+    for (size_t i = 0; i < glob_result.gl_pathc; i++) {
+        parse_bib_file(glob_result.gl_pathv[i], &root);
+    }
+    globfree(&glob_result);
 
     FILE *output = fopen("output.txt", "w");
     if (!output) {
-        fprintf(stderr, "Could not open output file.\n");
+        fprintf(stderr, "Не удалось открыть выходной файл.\n");
         free_tree(root);
         return EXIT_FAILURE;
     }
 
-    // Если указан поисковый термин, ищем, иначе выводим все записи
-    if (argc > 2 && strchr(argv[argc-1], '@') == NULL && strchr(argv[argc-1], '.') == NULL) {
-        fprintf(output, "Search results for '%s':\n\n", argv[argc-1]);
-        search_records(root, argv[argc-1], output);
+    if (last_arg_is_search) {
+        fprintf(output, "%% Результаты поиска для '%s':\n\n", search_term);
+        search_records(root, search_term, output);
     } else {
         write_tree_to_file(root, output);
     }
@@ -247,7 +275,7 @@ int main(int argc, char *argv[]) {
     fclose(output);
     free_tree(root);
 
-    printf("Processing completed. Results written to output.txt\n");
+    printf("Обработка завершена. Результаты записаны в output.txt\n");
     
     return EXIT_SUCCESS;
 }
