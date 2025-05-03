@@ -267,10 +267,10 @@ void find_similar_glyphs(IMG **glyphs, int count) {
             double similarity = compare_glyphs(glyphs[i], glyphs[j]);
             if (similarity <= SIMILARITY_THRESHOLD) {
                 similar_pairs++;
-                /*
+                
                 printf("Глифы %d и %d похожи (различие %.2f%%)\n", 
                        glyphs[i]->id, glyphs[j]->id, similarity * 100);
-                */
+                
             }
         }
     }
