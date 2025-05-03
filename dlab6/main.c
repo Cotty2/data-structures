@@ -161,7 +161,7 @@ void calculate_stats(IMG *glyph) {
     if (glyph->w == 0 || glyph->h == 0) {
         glyph->density = 0.0;
         glyph->perim = 0;
-        glyph->diam = 1; // Минимальный диаметр 1
+        glyph->diam = 1; 
         glyph->conn = 0;
         return;
     }
@@ -208,9 +208,9 @@ void calculate_stats(IMG *glyph) {
                 }
             }
         }
-        glyph->diam = max_dist + 1; // Увеличиваем диаметр на 1
+        glyph->diam = max_dist + 1; 
     } else {
-        glyph->diam = 1; // Минимальный диаметр 1
+        glyph->diam = 1; 
     }
     
     if (x_coords) free(x_coords);
